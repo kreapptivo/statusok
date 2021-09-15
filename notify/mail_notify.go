@@ -44,13 +44,34 @@ func (mailNotify MailNotify) Initialize() error {
 
 	} else {
 		isAuthorized = true
-		conn, err := net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
+		//conn, err := net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
+
+		conn, err := smtp.Dial(mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
+	        if err != nil {
+	            return err
+		}
+
+		 // TLS config
+	        tlsconfig := &tls.Config {
+    		    InsecureSkipVerify: false,
+	            ServerName: mailNotify.Host,
+		}
+
+
+		conn.StartTLS(tlsconfig)
+
 		if err != nil {
 			return err
 		}
 		if conn != nil {
 			defer conn.Close()
 		}
+
+		// Auth
+		if err = conn.Auth(auth); err != nil {
+    		    return err
+		}
+
 	}
 	// Validate sender and recipient
 	_, err := mail.ParseAddress(mailNotify.From)
