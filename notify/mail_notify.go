@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"crypto/tls"
 	"strconv"
 	"time"
 )
@@ -31,46 +32,45 @@ func (mailNotify MailNotify) GetClientName() string {
 func (mailNotify MailNotify) Initialize() error {
 
 	// Check if server listens on that port.
+
+	var conn *net.Con
+	var err error
+
+	 // TLS config
+	tlsconfig := &tls.Config {
+    	    InsecureSkipVerify: false,
+	    ServerName: mailNotify.Host,
+	}
+	
+	if mailNotify.Port==465 {
+	     conn, err = tls.Dial("tcp", mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port), tlsconfig)
+	}else if mailNotify.Port==587 {
+	    conn, err = net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
+	}else{
+	    //conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
+	    conn, err = net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
+	    conn.StartTLS(tlsconfig)
+	}
+
+	if err != nil {
+		return err
+	}
+	if conn != nil {
+		defer conn.Close()
+	}
+
 	if len(mailNotify.Username) == 0 && len(mailNotify.Password) == 0 {
 		isAuthorized = false
 
-		conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
-
-		if err != nil {
-			return err
-		}
-
-		client = conn
-
 	} else {
 		isAuthorized = true
-		//conn, err := net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
 
-		conn, err := smtp.Dial(mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
-	        if err != nil {
-	            return err
-		}
-
-		 // TLS config
-	        tlsconfig := &tls.Config {
-    		    InsecureSkipVerify: false,
-	            ServerName: mailNotify.Host,
-		}
-
-
-		conn.StartTLS(tlsconfig)
-
-		if err != nil {
-			return err
-		}
-		if conn != nil {
-			defer conn.Close()
-		}
-
+		//auth := smtp.PlainAuth("",mailNotify.Username, mailNotify.Password, mailNotifyHost)
+	
 		// Auth
-		if err = conn.Auth(auth); err != nil {
-    		    return err
-		}
+		//if err = conn.Auth(auth); err != nil {
+		//    return err
+		//}
 
 	}
 	// Validate sender and recipient
