@@ -113,7 +113,7 @@ func AddNew(databaseTypes DatabaseTypes) {
 
 // Insert test data to database
 func addTestErrorAndRequestInfo() {
-	println("Adding Test data to your database ....")
+	fmt.Println("Adding Test data to your database ....")
 
 	requestInfo := RequestInfo{0, "http://test.com", "GET", 0, 0, 0}
 

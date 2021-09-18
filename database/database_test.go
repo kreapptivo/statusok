@@ -6,8 +6,7 @@ import (
 )
 
 func TestInitialize(t *testing.T) {
-
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 	ids[1] = 10
 	ids[2] = 2
 
@@ -23,11 +22,10 @@ func TestInitialize(t *testing.T) {
 	if ErrorCount != 10 {
 		t.Error("ErrorCount Not Set")
 	}
-
 }
 
 func TestMeanResponseCalculation(t *testing.T) {
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 	ids[1] = 10
 	ids[2] = 2
 
@@ -39,11 +37,10 @@ func TestMeanResponseCalculation(t *testing.T) {
 	if mean != 10 {
 		t.Error("getMeanResponseTimeOfUrl Failed")
 	}
-
 }
 
 func TestAddRequestAndErrorInfo(t *testing.T) {
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 	ids[1] = 10
 	ids[2] = 2
 
@@ -60,14 +57,12 @@ func TestAddRequestAndErrorInfo(t *testing.T) {
 	mean, err := getMeanResponseTimeOfUrl(1)
 
 	if mean != 10 {
-
 		t.Error("Add Request Info Failed ", mean, err, responseMean[1], MeanResponseCount)
 	}
-
 }
 
 func TestClearQueue(t *testing.T) {
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 	ids[1] = 10
 	ids[2] = 2
 
@@ -83,7 +78,7 @@ func TestClearQueue(t *testing.T) {
 }
 
 func TestAddEmptyDatabase(t *testing.T) {
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 	ids[1] = 10
 	ids[2] = 2
 
@@ -101,7 +96,7 @@ func TestAddEmptyDatabase(t *testing.T) {
 }
 
 func TestAddValidDatabase(t *testing.T) {
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 	ids[1] = 10
 	ids[2] = 2
 

@@ -1,25 +1,29 @@
 package database
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"time"
 
-	"github.com/influxdata/influxdb/client/v2"
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 )
 
 type InfluxDb struct {
-	Host         string `json:"host"`
-	Port         int    `json:"port"`
-	DatabaseName string `json:"databaseName"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Bucket string `json:"bucket"`
+	Org    string `json:"org"`
+	Token  string `json:"token"`
 }
 
-var influxDBcon client.Client
+var (
+	influxDBcon influxdb2.Client
+	ctx         context.Context
+	ctxCancel   context.CancelFunc
+)
 
 const (
 	DatabaseName = "InfluxDB"
@@ -32,45 +36,33 @@ func (influxDb InfluxDb) GetDatabaseName() string {
 
 // Intiliaze influx db
 func (influxDb InfluxDb) Initialize() error {
-	println("InfluxDB : Trying to Connect to database ")
+	ctx, ctxCancel = context.WithTimeout(context.Background(), 5*time.Second)
 
-	u, err := url.Parse(fmt.Sprintf("http://%s:%d", influxDb.Host, influxDb.Port))
+	// TODO: check config variables!
+
+	fmt.Printf("InfluxDB : Trying to Connect to host %s\n", influxDb.Host)
+
+	databaseUri := fmt.Sprintf("http://%s:%d", influxDb.Host, influxDb.Port)
+	_, err := url.Parse(databaseUri)
 	if err != nil {
-		println("InfluxDB : Invalid Url. Please check domain name given in config file!\nError Details: ", err.Error())
+		fmt.Printf("InfluxDB : Invalid Url \"%s\". Please check domain name given in config file!\nError Details: %s", databaseUri, err.Error())
 		return err
 	}
 
-	conf := client.HTTPConfig{
-		Addr:     u.String(),
-		Username: influxDb.Username,
-		Password: influxDb.Password,
-	}
+	influxDBcon = influxdb2.NewClient(databaseUri, influxDb.Token)
 
-	influxDBcon, err = client.NewHTTPClient(conf)
-
+	check, err := influxDBcon.Health(ctx)
 	if err != nil {
-		println("InfluxDB : Failed to connect to Database. Please check the details entered in the config file!\nError Details: ", err.Error())
+		fmt.Printf("InfluxDB : Failed to connect to Database %s with Token %s. Please check the details entered in the config file!\nError Details: %s", databaseUri, influxDb.Token, err.Error())
 		return err
 	}
 
-	_, ver, err := influxDBcon.Ping(10 * time.Second)
-	if err != nil {
-		println("InfluxDB : Failed to connect to Database. Please check the details entered in the config file!\nError Details: ", err.Error())
-		return err
+	if check.Status == "pass" {
+		fmt.Printf("InfluxDB: Successfuly connected to InfluxDB version: %s\n", *check.Version)
+		return nil
 	}
 
-	createDbErr := createDatabase(influxDb.DatabaseName)
-
-	if createDbErr != nil {
-		if createDbErr.Error() != "database already exists" {
-			println("InfluxDB : Failed to create Database")
-			return createDbErr
-		}
-	}
-
-	println("InfluxDB: Successfuly connected . Version:", ver)
-
-	return nil
+	return fmt.Errorf("InfluxDB: Database not ready, got %s for state: %s", check.Status, *check.Message)
 }
 
 // Add request information to database
@@ -84,28 +76,13 @@ func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
 		"responseCode": requestInfo.ResponseCode,
 	}
 
-	bps, err := client.NewBatchPoints(client.BatchPointsConfig{
-		Database:  influxDb.DatabaseName,
-		Precision: "ms",
-	})
-	if err != nil {
-		return err
-	}
+	writeAPI := influxDBcon.WriteAPIBlocking(influxDb.Org, influxDb.Bucket)
 
-	point, err := client.NewPoint(
-		requestInfo.Url,
-		tags,
-		fields,
-		time.Now(),
-	)
-	if err != nil {
-		return err
-	}
+	// Create point using full params constructor
+	p := influxdb2.NewPoint(requestInfo.Url, tags, fields, time.Now())
 
-	bps.AddPoint(point)
-
-	err = influxDBcon.Write(bps)
-
+	// Write point immediately
+	err := writeAPI.WritePoint(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -126,27 +103,17 @@ func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
 		"otherInfo":    errorInfo.OtherInfo,
 	}
 
-	point, err := client.NewPoint(
-		errorInfo.Url,
+	writeAPI := influxDBcon.WriteAPIBlocking(influxDb.Org, influxDb.Bucket)
+
+	// Create point using full params constructor
+	p := influxdb2.NewPoint(errorInfo.Url,
 		tags,
 		fields,
 		time.Now(),
 	)
-	if err != nil {
-		return err
-	}
-	bps, err := client.NewBatchPoints(client.BatchPointsConfig{
-		Database:  influxDb.DatabaseName,
-		Precision: "ms",
-	})
-	if err != nil {
-		return err
-	}
 
-	bps.AddPoint(point)
-
-	err = influxDBcon.Write(bps)
-
+	// Write point immediately
+	err := writeAPI.WritePoint(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -158,52 +125,27 @@ func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
 func (influxDb InfluxDb) GetMeanResponseTime(Url string, span int) (float64, error) {
 	q := fmt.Sprintf(`select mean(responseTime) from "%s" WHERE time > now() - %dm GROUP BY time(%dm)`, Url, span, span)
 
-	res, err := queryDB(q, influxDb.DatabaseName)
+	// Get query client
+	queryAPI := influxDBcon.QueryAPI(influxDb.Org)
+
+	//`from(bucket:"my-bucket")|> range(start: -1h) |> filter(fn: (r) => r._measurement == "stat")`)
+
+	// Get parser flux query result
+	result, err := queryAPI.Query(ctx, q)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Got error %s for query %s", err, q)
 		return 0, err
 	}
 
-	// Retrive the last record
-	noOfRows := len(res[0].Series[0].Values)
-	fmt.Println(q)
-	if noOfRows != 0 {
-		row := res[0].Series[0].Values[noOfRows-1]
-		t, err := time.Parse(time.RFC3339, row[0].(string))
-		if err != nil || row[1] == nil {
-
-			fmt.Println("error ", err, " ", row[1])
-			return 0, err
+	// Use Next() to iterate over query result lines
+	for result.Next() {
+		// Observe when there is new grouping key producing new table
+		if result.TableChanged() {
+			fmt.Printf("table: %s\n", result.TableMetadata().String())
 		}
-		val, err2 := row[1].(json.Number).Float64()
-		if err2 != nil {
-
-			fmt.Println(err)
-			return 0, err2
-		}
-
-		fmt.Printf("[%2d] %s: %03f\n", 1, t.Format(time.Stamp), val)
-		return val, nil
+		// read result
+		fmt.Printf("row: %s\n", result.Record().String())
 	}
-	return 0, errors.New("error")
-}
 
-func createDatabase(databaseName string) error {
-	_, err := queryDB(fmt.Sprintf("create database %s", databaseName), "")
-
-	return err
-}
-
-func queryDB(cmd string, databaseName string) (res []client.Result, err error) {
-	q := client.Query{
-		Command:  cmd,
-		Database: databaseName,
-	}
-	if response, err := influxDBcon.Query(q); err == nil {
-		if response.Error() != nil {
-			return res, response.Error()
-		}
-		res = response.Results
-	}
-	return
+	return 0, errors.New("not yet fully implemented")
 }
