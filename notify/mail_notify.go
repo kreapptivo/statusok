@@ -30,6 +30,19 @@ func (mailNotify MailNotify) GetClientName() string {
 }
 
 func (mailNotify MailNotify) Initialize() error {
+	var err error
+
+	// Validate sender and recipient
+	_, err = mail.ParseAddress(mailNotify.From)
+	if err != nil {
+		return err
+	}
+	_, err = mail.ParseAddress(mailNotify.To)
+	// TODO: validate port and email host
+	if err != nil {
+		return err
+	}
+
 	// Check if server listens on that port.
 
 	// TLS config
@@ -37,29 +50,23 @@ func (mailNotify MailNotify) Initialize() error {
 		InsecureSkipVerify: false,
 		ServerName:         mailNotify.Host,
 	}
+	const timeout = 3 * time.Second
 
-	var err error
-
+	conn, err := net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), timeout)
+	if err != nil {
+		return err
+	}
 	if mailNotify.Port == 465 {
-		conn, err := tls.Dial("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), tlsconfig)
+		tlsConn := tls.Client(conn, tlsconfig)
+		err = tlsConn.Handshake()
 		if err != nil {
 			return err
 		}
-		client, err = smtp.NewClient(conn, mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
+		client, err = smtp.NewClient(tlsConn, mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
 	} else if mailNotify.Port == 587 {
-		// conn, err = net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
-		conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
-		if err != nil {
-			return err
-		}
-		conn.StartTLS(tlsconfig)
-		client = conn
+		client, err = smtp.NewClient(conn, mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
+		client.StartTLS(tlsconfig)
 	} else {
-		// conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
-		conn, err := net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
-		if err != nil {
-			return err
-		}
 		client, err = smtp.NewClient(conn, mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
 	}
 	if err != nil {
@@ -77,16 +84,6 @@ func (mailNotify MailNotify) Initialize() error {
 		//if err = conn.Auth(auth); err != nil {
 		//    return err
 		//}
-	}
-	// Validate sender and recipient
-	_, err = mail.ParseAddress(mailNotify.From)
-	if err != nil {
-		return err
-	}
-	_, err = mail.ParseAddress(mailNotify.To)
-	// TODO: validate port and email host
-	if err != nil {
-		return err
 	}
 
 	return nil
