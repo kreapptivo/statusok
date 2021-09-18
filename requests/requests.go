@@ -97,14 +97,13 @@ func (requestConfig *RequestConfig) Validate() error {
 }
 
 func fmtDuration(d time.Duration) string {
-	dlog := d
 	d = d.Round(time.Second)
 	h := d / time.Hour
 	d -= h * time.Hour
 	m := d / time.Minute
 	m -= m * time.Minute
 	s := d / time.Second
-	return fmt.Sprintf("%02d:%02d:%02d (%d)", h, m, s, dlog)
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
 
 // Initialize data from config file and check all requests
