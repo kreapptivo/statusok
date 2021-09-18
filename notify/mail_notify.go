@@ -1,12 +1,12 @@
 package notify
 
-//Inspired from https://github.com/zbindenren/logrus_mail
+// Inspired from https://github.com/zbindenren/logrus_mail
 import (
 	"bytes"
+	"crypto/tls"
 	"net"
 	"net/mail"
 	"net/smtp"
-	"crypto/tls"
 	"strconv"
 	"time"
 )
@@ -30,56 +30,61 @@ func (mailNotify MailNotify) GetClientName() string {
 }
 
 func (mailNotify MailNotify) Initialize() error {
-
 	// Check if server listens on that port.
 
-	var conn *net.Con
+	// TLS config
+	tlsconfig := &tls.Config{
+		InsecureSkipVerify: false,
+		ServerName:         mailNotify.Host,
+	}
+
 	var err error
 
-	 // TLS config
-	tlsconfig := &tls.Config {
-    	    InsecureSkipVerify: false,
-	    ServerName: mailNotify.Host,
+	if mailNotify.Port == 465 {
+		conn, err := tls.Dial("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), tlsconfig)
+		if err != nil {
+			return err
+		}
+		client, err = smtp.NewClient(conn, mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
+	} else if mailNotify.Port == 587 {
+		// conn, err = net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
+		conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
+		if err != nil {
+			return err
+		}
+		conn.StartTLS(tlsconfig)
+		client = conn
+	} else {
+		// conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
+		conn, err := net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
+		if err != nil {
+			return err
+		}
+		client, err = smtp.NewClient(conn, mailNotify.Host+":"+strconv.Itoa(mailNotify.Port))
 	}
-	
-	if mailNotify.Port==465 {
-	     conn, err = tls.Dial("tcp", mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port), tlsconfig)
-	}else if mailNotify.Port==587 {
-	    conn, err = net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
-	}else{
-	    //conn, err := smtp.Dial(mailNotify.Host + ":" + strconv.Itoa(mailNotify.Port))
-	    conn, err = net.DialTimeout("tcp", mailNotify.Host+":"+strconv.Itoa(mailNotify.Port), 3*time.Second)
-	    conn.StartTLS(tlsconfig)
-	}
-
 	if err != nil {
 		return err
-	}
-	if conn != nil {
-		defer conn.Close()
 	}
 
 	if len(mailNotify.Username) == 0 && len(mailNotify.Password) == 0 {
 		isAuthorized = false
-
 	} else {
 		isAuthorized = true
 
-		//auth := smtp.PlainAuth("",mailNotify.Username, mailNotify.Password, mailNotifyHost)
-	
+		// auth := smtp.PlainAuth("",mailNotify.Username, mailNotify.Password, mailNotifyHost)
+
 		// Auth
 		//if err = conn.Auth(auth); err != nil {
 		//    return err
 		//}
-
 	}
 	// Validate sender and recipient
-	_, err := mail.ParseAddress(mailNotify.From)
+	_, err = mail.ParseAddress(mailNotify.From)
 	if err != nil {
 		return err
 	}
 	_, err = mail.ParseAddress(mailNotify.To)
-	//TODO: validate port and email host
+	// TODO: validate port and email host
 	if err != nil {
 		return err
 	}
@@ -103,14 +108,12 @@ func (mailNotify MailNotify) SendResponseTimeNotification(responseTimeNotificati
 			[]string{mailNotify.To},
 			bytes.NewBufferString(message).Bytes(),
 		)
-
 		if err != nil {
 			return err
 		}
 		return nil
 	} else {
 		wc, err := client.Data()
-
 		if err != nil {
 			return err
 		}
@@ -149,7 +152,6 @@ func (mailNotify MailNotify) SendErrorNotification(errorNotification ErrorNotifi
 		return nil
 	} else {
 		wc, err := client.Data()
-
 		if err != nil {
 			return err
 		}
