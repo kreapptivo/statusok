@@ -43,7 +43,7 @@ func (mailNotify MailNotify) Initialize() error {
 		return err
 	}
 
-	// Check if server listens on that port.
+	// Check server connection.
 
 	// TLS config
 	tlsconfig := &tls.Config{
@@ -77,90 +77,39 @@ func (mailNotify MailNotify) Initialize() error {
 		isAuthorized = false
 	} else {
 		isAuthorized = true
-
-		// auth := smtp.PlainAuth("",mailNotify.Username, mailNotify.Password, mailNotifyHost)
-
-		// Auth
-		//if err = conn.Auth(auth); err != nil {
-		//    return err
-		//}
 	}
 
 	return nil
 }
 
-func (mailNotify MailNotify) SendResponseTimeNotification(responseTimeNotification ResponseTimeNotification) error {
+func (mailNotify MailNotify) sendEmail(message string) error {
+	var smtpAuth smtp.Auth
 	if isAuthorized {
-
-		auth := smtp.PlainAuth("", mailNotify.Username, mailNotify.Password, mailNotify.Host)
-
-		message := getMessageFromResponseTimeNotification(responseTimeNotification)
-
-		// Connect to the server, authenticate, set the sender and recipient,
-		// and send the email all in one step.
-		err := smtp.SendMail(
-			mailNotify.Host+":"+strconv.Itoa(mailNotify.Port),
-			auth,
-			mailNotify.From,
-			[]string{mailNotify.To},
-			bytes.NewBufferString(message).Bytes(),
-		)
-		if err != nil {
-			return err
-		}
-		return nil
+		smtpAuth = smtp.PlainAuth("", mailNotify.Username, mailNotify.Password, mailNotify.Host)
 	} else {
-		wc, err := client.Data()
-		if err != nil {
-			return err
-		}
-
-		defer wc.Close()
-
-		message := bytes.NewBufferString(getMessageFromResponseTimeNotification(responseTimeNotification))
-
-		if _, err = message.WriteTo(wc); err != nil {
-			return err
-		}
-
-		return nil
+		smtpAuth = nil
 	}
+	err := smtp.SendMail(
+		mailNotify.Host+":"+strconv.Itoa(mailNotify.Port),
+		smtpAuth,
+		mailNotify.From,
+		[]string{mailNotify.To},
+		bytes.NewBufferString(message).Bytes(),
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (mailNotify MailNotify) SendResponseTimeNotification(responseTimeNotification ResponseTimeNotification) error {
+	message := getMessageFromResponseTimeNotification(responseTimeNotification)
+
+	return mailNotify.sendEmail(message)
 }
 
 func (mailNotify MailNotify) SendErrorNotification(errorNotification ErrorNotification) error {
-	if isAuthorized {
+	message := getMessageFromErrorNotification(errorNotification)
 
-		auth := smtp.PlainAuth("", mailNotify.Username, mailNotify.Password, mailNotify.Host)
-
-		message := getMessageFromErrorNotification(errorNotification)
-
-		// Connect to the server, authenticate, set the sender and recipient,
-		// and send the email all in one step.
-		err := smtp.SendMail(
-			mailNotify.Host+":"+strconv.Itoa(mailNotify.Port),
-			auth,
-			mailNotify.From,
-			[]string{mailNotify.To},
-			bytes.NewBufferString(message).Bytes(),
-		)
-		if err != nil {
-			return err
-		}
-		return nil
-	} else {
-		wc, err := client.Data()
-		if err != nil {
-			return err
-		}
-
-		defer wc.Close()
-
-		message := bytes.NewBufferString(getMessageFromErrorNotification(errorNotification))
-
-		if _, err = message.WriteTo(wc); err != nil {
-			return err
-		}
-
-		return nil
-	}
+	return mailNotify.sendEmail(message)
 }
