@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"statusok/database"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"statusok/database"
 	"strconv"
 	"time"
 )
@@ -23,12 +23,15 @@ var (
 const (
 	ContentType     = "Content-Type"
 	ContentLength   = "Content-Length"
+	UserAgent       = "User-Agent"
 	FormContentType = "application/x-www-form-urlencoded"
 	JsonContentType = "application/json"
 
 	DefaultTime         = "300s"
+	DefaultTimeout      = "10s"
 	DefaultResponseCode = http.StatusOK
 	DefaultConcurrency  = 1
+	DefaultUserAgent    = "Kreapptivo/Monitoring v1.0b"
 )
 
 type RequestConfig struct {
@@ -40,17 +43,19 @@ type RequestConfig struct {
 	UrlParams    map[string]string `json:"urlParams"`
 	ResponseCode int               `json:"responseCode"`
 	ResponseTime int64             `json:"responseTime"`
-	CheckEvery   time.Duration     `json:"checkEvery"`
+	CheckEvery   string            `json:"checkEvery"`
+	_checkEvery  time.Duration     `json:"-"`
+	Timeout      string            `json:"timeout"`
+	_timeout     time.Duration     `json:"-"`
 }
 
-//Set Id for request
+// Set Id for request
 func (requestConfig *RequestConfig) SetId(id int) {
 	requestConfig.Id = id
 }
 
-//check whether all requestConfig fields are valid
+// check whether all requestConfig fields are valid
 func (requestConfig *RequestConfig) Validate() error {
-
 	if len(requestConfig.Url) == 0 {
 		return errors.New("Invalid Url")
 	}
@@ -71,19 +76,42 @@ func (requestConfig *RequestConfig) Validate() error {
 		requestConfig.ResponseCode = DefaultResponseCode
 	}
 
-	if requestConfig.CheckEvery == 0 {
-		defTime, _ := time.ParseDuration(DefaultTime)
-		requestConfig.CheckEvery = defTime
+	if len(requestConfig.CheckEvery) == 0 {
+		requestConfig.CheckEvery = DefaultTime
 	}
+	var err error
+	if requestConfig._checkEvery, err = time.ParseDuration(requestConfig.CheckEvery); err != nil {
+		return fmt.Errorf("CheckEvery format is invalid %s", err)
+	}
+	fmt.Printf("Check every: %s\n", fmtDuration(requestConfig._checkEvery))
+
+	if len(requestConfig.Timeout) == 0 {
+		requestConfig.Timeout = DefaultTimeout
+	}
+	if requestConfig._timeout, err = time.ParseDuration(requestConfig.Timeout); err != nil {
+		return fmt.Errorf("Timeout format is invalid %s", err)
+	}
+	fmt.Printf("Request timeout: %s\n", fmtDuration(requestConfig._timeout))
 
 	return nil
 }
 
-//Initialize data from config file and check all requests
+func fmtDuration(d time.Duration) string {
+	dlog := d
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	d -= h * time.Hour
+	m := d / time.Minute
+	m -= m * time.Minute
+	s := d / time.Second
+	return fmt.Sprintf("%02d:%02d:%02d (%d)", h, m, s, dlog)
+}
+
+// Initialize data from config file and check all requests
 func RequestsInit(data []RequestConfig, concurrency int) {
 	RequestsList = data
 
-	//throttle channel is used to limit number of requests performed at a time
+	// throttle channel is used to limit number of requests performed at a time
 	if concurrency == 0 {
 		throttle = make(chan int, DefaultConcurrency)
 	} else {
@@ -93,21 +121,21 @@ func RequestsInit(data []RequestConfig, concurrency int) {
 	requestChannel = make(chan RequestConfig, len(data))
 
 	if len(data) == 0 {
-		println("\nNo requests to monitor.Please add requests to you config file")
+		println("\nNo requests to monitor. Please add requests to you config file")
 		os.Exit(3)
 	}
-	//send requests to make sure every every request is valid
+	// send requests to make sure every every request is valid
 	println("\nSending requests to apis.....making sure everything is right before we start monitoring")
 	println("Api Count: ", len(data))
 
 	for i, requestConfig := range data {
 		println("Request #", i, " : ", requestConfig.RequestType, " ", requestConfig.Url)
 
-		//Perform request
+		// Perform request
 		reqErr := PerformRequest(requestConfig, nil)
 
 		if reqErr != nil {
-			//Request Failed
+			// Request Failed
 			println("\nFailed !!!! Not able to perfome below request")
 			println("\n----Request Deatails---")
 			println("Url :", requestConfig.Url)
@@ -121,7 +149,7 @@ func RequestsInit(data []RequestConfig, concurrency int) {
 	println("All requests Successfull")
 }
 
-//Start monitoring by calling createTicker method for each request
+// Start monitoring by calling createTicker method for each request
 func StartMonitoring() {
 	fmt.Println("\nStarted Monitoring all ", len(RequestsList), " apis .....")
 
@@ -132,10 +160,9 @@ func StartMonitoring() {
 	}
 }
 
-//A time ticker writes data to request channel for every request.CheckEvery seconds
+// A time ticker writes data to request channel for every request.CheckEvery seconds
 func createTicker(requestConfig RequestConfig) {
-
-	var ticker *time.Ticker = time.NewTicker(requestConfig.CheckEvery * time.Second)
+	var ticker *time.Ticker = time.NewTicker(requestConfig._checkEvery)
 	quit := make(chan struct{})
 	for {
 		select {
@@ -148,11 +175,10 @@ func createTicker(requestConfig RequestConfig) {
 	}
 }
 
-//all tickers write to request channel
-//here we listen to request channel and perfom each request
+// all tickers write to request channel
+// here we listen to request channel and perfom each request
 func listenToRequestChannel() {
-
-	//throttle is used to limit number of requests executed at a time
+	// throttle is used to limit number of requests executed at a time
 	for {
 		select {
 		case requect := <-requestChannel:
@@ -160,12 +186,11 @@ func listenToRequestChannel() {
 			go PerformRequest(requect, throttle)
 		}
 	}
-
 }
 
-//takes the date from requestConfig and creates http request and executes it
+// takes the date from requestConfig and creates http request and executes it
 func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
-	//Remove value from throttel channel when request is completed
+	// Remove value from throttel channel when request is completed
 	defer func() {
 		if throttle != nil {
 			<-throttle
@@ -176,18 +201,17 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 	var reqErr error
 
 	if len(requestConfig.FormParams) == 0 {
-		//formParams create a request
+		// formParams create a request
 		request, reqErr = http.NewRequest(requestConfig.RequestType,
 			requestConfig.Url,
 			nil)
-
 	} else {
 		if requestConfig.Headers[ContentType] == JsonContentType {
-			//create a request using using formParams
+			// create a request using using formParams
 
 			jsonBody, jsonErr := GetJsonParamsBody(requestConfig.FormParams)
 			if jsonErr != nil {
-				//Not able to create Request object.Add Error to Database
+				// Not able to create Request object.Add Error to Database
 				go database.AddErrorInfo(database.ErrorInfo{
 					Id:           requestConfig.Id,
 					Url:          requestConfig.Url,
@@ -205,7 +229,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 				jsonBody)
 
 		} else {
-			//create a request using formParams
+			// create a request using formParams
 			formParams := GetUrlValues(requestConfig.FormParams)
 
 			request, reqErr = http.NewRequest(requestConfig.RequestType,
@@ -215,15 +239,22 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 			request.Header.Add(ContentLength, strconv.Itoa(len(formParams.Encode())))
 
 			if requestConfig.Headers[ContentType] != "" {
-				//Add content type to header if user doesnt mention it config file
-				//Default content type application/x-www-form-urlencoded
+				// Add content type to header if user doesnt mention it config file
+				// Default content type application/x-www-form-urlencoded
 				request.Header.Add(ContentType, FormContentType)
 			}
+
 		}
 	}
 
+	if requestConfig.Headers[UserAgent] != "" {
+		request.Header.Add(UserAgent, requestConfig.Headers[UserAgent])
+	} else {
+		request.Header.Add(UserAgent, DefaultUserAgent)
+	}
+
 	if reqErr != nil {
-		//Not able to create Request object.Add Error to Database
+		// Not able to create Request object.Add Error to Database
 		go database.AddErrorInfo(database.ErrorInfo{
 			Id:           requestConfig.Id,
 			Url:          requestConfig.Url,
@@ -237,31 +268,24 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 		return reqErr
 	}
 
-	//add url parameters to query if present
+	// add url parameters to query if present
 	if len(requestConfig.UrlParams) != 0 {
 		urlParams := GetUrlValues(requestConfig.UrlParams)
 		request.URL.RawQuery = urlParams.Encode()
 	}
 
-	//Add headers to the request
+	// Add headers to the request
 	AddHeaders(request, requestConfig.Headers)
 
-	//TODO: put timeout ?
-	/*
-		timeout := 10 * requestConfig.ResponseTime
-
-		client := &http.Client{
-			Timeout: timeout,
-		}
-	*/
-
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: requestConfig._timeout,
+	}
 	start := time.Now()
 
 	getResponse, respErr := client.Do(request)
 
 	if respErr != nil {
-		//Request failed . Add error info to database
+		// Request failed . Add error info to database
 		var statusCode int
 		if getResponse == nil {
 			statusCode = 0
@@ -283,7 +307,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 	defer getResponse.Body.Close()
 
 	if getResponse.StatusCode != requestConfig.ResponseCode {
-		//Response code is not the expected one .Add Error to database
+		// Response code is not the expected one .Add Error to database
 		go database.AddErrorInfo(database.ErrorInfo{
 			Id:           requestConfig.Id,
 			Url:          requestConfig.Url,
@@ -298,7 +322,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 
 	elapsed := time.Since(start)
 
-	//Request succesfull . Add infomartion to Database
+	// Request succesfull . Add infomartion to Database
 	go database.AddRequestInfo(database.RequestInfo{
 		Id:                   requestConfig.Id,
 		Url:                  requestConfig.Url,
@@ -311,7 +335,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 	return nil
 }
 
-//convert response body to string
+// convert response body to string
 func convertResponseToString(resp *http.Response) string {
 	if resp == nil {
 		return " "
@@ -326,14 +350,14 @@ func convertResponseToString(resp *http.Response) string {
 	return buf.String()
 }
 
-//Add header values from map to request
+// Add header values from map to request
 func AddHeaders(req *http.Request, headers map[string]string) {
 	for key, value := range headers {
 		req.Header.Add(key, value)
 	}
 }
 
-//convert params in map to url.Values
+// convert params in map to url.Values
 func GetUrlValues(params map[string]string) url.Values {
 	urlParams := url.Values{}
 	i := 0
@@ -348,7 +372,7 @@ func GetUrlValues(params map[string]string) url.Values {
 	return urlParams
 }
 
-//Creates body for request of type application/json from map
+// Creates body for request of type application/json from map
 func GetJsonParamsBody(params map[string]string) (io.Reader, error) {
 	data, jsonErr := json.Marshal(params)
 
@@ -362,7 +386,7 @@ func GetJsonParamsBody(params map[string]string) (io.Reader, error) {
 	return bytes.NewBuffer(data), nil
 }
 
-//creates an error when response code from server is not equal to response code mentioned in config file
+// creates an error when response code from server is not equal to response code mentioned in config file
 func errResposeCode(status int, expectedStatus int) error {
 	return errors.New(fmt.Sprintf("Got Response code %v. Expected Response Code %v ", status, expectedStatus))
 }
