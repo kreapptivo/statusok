@@ -17,7 +17,6 @@ var (
 
 	dbList       []Database      // list of databases registered
 	responseMean map[int][]int64 // A map of queues to calculate mean response time
-	// dbMain       Database
 
 	ErrResposeCode   = errors.New("Response code do not Match")
 	ErrTimeout       = errors.New("Request Time out Error")
@@ -88,8 +87,8 @@ func AddNew(databaseTypes DatabaseTypes) {
 		}
 	}
 
-	if len(dbList) != 0 {
-		println("Intializing Database....")
+	if len(dbList) > 0 {
+		fmt.Printf("Intializing Databases....")
 	}
 
 	// Intialize all databases given by user by calling the initialize method
@@ -98,7 +97,7 @@ func AddNew(databaseTypes DatabaseTypes) {
 		initErr := value.Initialize()
 
 		if initErr != nil {
-			println("Failed to Intialize Database ")
+			fmt.Printf("Failed to Intialize Database %s, err: %s\n", value.GetDatabaseName(), initErr)
 			os.Exit(3)
 		}
 
@@ -106,7 +105,6 @@ func AddNew(databaseTypes DatabaseTypes) {
 
 	// Set first database as primary database
 	if len(dbList) > 0 {
-		// dbMain = dbList[0]
 		addTestErrorAndRequestInfo()
 	} else {
 		fmt.Println("No Database selected.")
@@ -124,13 +122,13 @@ func addTestErrorAndRequestInfo() {
 	for _, db := range dbList {
 		reqErr := db.AddRequestInfo(requestInfo)
 		if reqErr != nil {
-			println(db.GetDatabaseName, ": Failed to insert Request Info to database.Please check whether database is installed properly")
+			fmt.Printf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), reqErr)
 		}
 
 		errErr := db.AddErrorInfo(errorInfo)
 
 		if errErr != nil {
-			println(db.GetDatabaseName, ": Failed to insert Error Info to database.Please check whether database is installed properly")
+			fmt.Printf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), errErr)
 		}
 
 	}
