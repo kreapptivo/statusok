@@ -132,6 +132,20 @@ func (mailNotify MailNotify) sendEmail(subject string, message string) error {
 	if err = client.Mail(mailNotify.From); err != nil {
 		return err
 	}
+	to := make([]string, 0, 2)
+	to = append(to, mailNotify.To, mailNotify.Cc)
+	for i := 0; i < len(to); i++ {
+		addr, err := mail.ParseAddress(to[i])
+		if err != nil {
+			return err
+		}
+		to[i] = addr.Address
+	}
+	for _, addr := range to {
+		if err = client.Rcpt(addr); err != nil {
+			return err
+		}
+	}
 	if err = client.Rcpt(mailNotify.To); err != nil {
 		return err
 	}
