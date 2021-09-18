@@ -19,26 +19,24 @@ type InfluxDb struct {
 	Password     string `json:"password"`
 }
 
-var (
-	influxDBcon client.Client
-)
+var influxDBcon client.Client
 
 const (
 	DatabaseName = "InfluxDB"
 )
 
-//Return database name
+// Return database name
 func (influxDb InfluxDb) GetDatabaseName() string {
 	return DatabaseName
 }
 
-//Intiliaze influx db
+// Intiliaze influx db
 func (influxDb InfluxDb) Initialize() error {
 	println("InfluxDB : Trying to Connect to database ")
 
 	u, err := url.Parse(fmt.Sprintf("http://%s:%d", influxDb.Host, influxDb.Port))
 	if err != nil {
-		println("InfluxDB : Invalid Url,Please check domain name given in config file \nError Details: ", err.Error())
+		println("InfluxDB : Invalid Url. Please check domain name given in config file!\nError Details: ", err.Error())
 		return err
 	}
 
@@ -51,14 +49,13 @@ func (influxDb InfluxDb) Initialize() error {
 	influxDBcon, err = client.NewHTTPClient(conf)
 
 	if err != nil {
-		println("InfluxDB : Failed to connect to Database . Please check the details entered in the config file\nError Details: ", err.Error())
+		println("InfluxDB : Failed to connect to Database. Please check the details entered in the config file!\nError Details: ", err.Error())
 		return err
 	}
 
 	_, ver, err := influxDBcon.Ping(10 * time.Second)
-
 	if err != nil {
-		println("InfluxDB : Failed to connect to Database . Please check the details entered in the config file\nError Details: ", err.Error())
+		println("InfluxDB : Failed to connect to Database. Please check the details entered in the config file!\nError Details: ", err.Error())
 		return err
 	}
 
@@ -69,7 +66,6 @@ func (influxDb InfluxDb) Initialize() error {
 			println("InfluxDB : Failed to create Database")
 			return createDbErr
 		}
-
 	}
 
 	println("InfluxDB: Successfuly connected . Version:", ver)
@@ -77,9 +73,8 @@ func (influxDb InfluxDb) Initialize() error {
 	return nil
 }
 
-//Add request information to database
+// Add request information to database
 func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
-
 	tags := map[string]string{
 		"requestId":   strconv.Itoa(requestInfo.Id),
 		"requestType": requestInfo.RequestType,
@@ -93,7 +88,6 @@ func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
 		Database:  influxDb.DatabaseName,
 		Precision: "ms",
 	})
-
 	if err != nil {
 		return err
 	}
@@ -104,7 +98,6 @@ func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
 		fields,
 		time.Now(),
 	)
-
 	if err != nil {
 		return err
 	}
@@ -120,9 +113,8 @@ func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
 	return nil
 }
 
-//Add Error information to database
+// Add Error information to database
 func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
-
 	tags := map[string]string{
 		"requestId":   strconv.Itoa(errorInfo.Id),
 		"requestType": errorInfo.RequestType,
@@ -140,7 +132,6 @@ func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
 		fields,
 		time.Now(),
 	)
-
 	if err != nil {
 		return err
 	}
@@ -148,7 +139,6 @@ func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
 		Database:  influxDb.DatabaseName,
 		Precision: "ms",
 	})
-
 	if err != nil {
 		return err
 	}
@@ -164,19 +154,17 @@ func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
 	return nil
 }
 
-//Returns mean response time of url in given time .Currentlt not used
+// Returns mean response time of url in given time .Currentlt not used
 func (influxDb InfluxDb) GetMeanResponseTime(Url string, span int) (float64, error) {
-
 	q := fmt.Sprintf(`select mean(responseTime) from "%s" WHERE time > now() - %dm GROUP BY time(%dm)`, Url, span, span)
 
 	res, err := queryDB(q, influxDb.DatabaseName)
-
 	if err != nil {
 		fmt.Println(err)
 		return 0, err
 	}
 
-	//Retrive the last record
+	// Retrive the last record
 	noOfRows := len(res[0].Series[0].Values)
 	fmt.Println(q)
 	if noOfRows != 0 {
@@ -194,14 +182,13 @@ func (influxDb InfluxDb) GetMeanResponseTime(Url string, span int) (float64, err
 			return 0, err2
 		}
 
-		fmt.Println("[%2d] %s: %03d\n", 1, t.Format(time.Stamp), val, err2)
+		fmt.Printf("[%2d] %s: %03f\n", 1, t.Format(time.Stamp), val)
 		return val, nil
 	}
 	return 0, errors.New("error")
 }
 
 func createDatabase(databaseName string) error {
-
 	_, err := queryDB(fmt.Sprintf("create database %s", databaseName), "")
 
 	return err
