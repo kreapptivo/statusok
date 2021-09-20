@@ -60,7 +60,7 @@
 				"description":"sanath test",
 				"url":"http://google.com"
 			},
-			"checkEvery":30,
+			"checkEvery":"30s",
 			"responseCode":200,
 			"responseTime":800
 		},
@@ -73,7 +73,7 @@
 			"urlParams":{
 				"name":"statusok"
 			},
-			"checkEvery":300,
+			"checkEvery":"300s",
 			"responseCode":200,
 			"responseTime":800
 		},
@@ -83,7 +83,7 @@
 			"formParams":{
 				"name":"statusok"
 			},
-			"checkEvery":300,
+			"checkEvery":"300s",
 			"responseCode":200,
 			"responseTime":800
 		},
@@ -94,7 +94,7 @@
 			},
 			"params":{
 			},
-			"checkEvery":30,
+			"checkEvery":"30s",
 			"responseCode":200,
 			"responseTime":800
 		}

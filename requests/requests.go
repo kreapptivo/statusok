@@ -35,18 +35,19 @@ const (
 )
 
 type RequestConfig struct {
-	Id           int
-	Url          string            `json:"url"`
-	RequestType  string            `json:"requestType"`
-	Headers      map[string]string `json:"headers"`
-	FormParams   map[string]string `json:"formParams"`
-	UrlParams    map[string]string `json:"urlParams"`
-	ResponseCode int               `json:"responseCode"`
-	ResponseTime int64             `json:"responseTime"`
-	CheckEvery   string            `json:"checkEvery"`
-	_checkEvery  time.Duration     `json:"-"`
-	Timeout      string            `json:"timeout"`
-	_timeout     time.Duration     `json:"-"`
+	Id                  int
+	Url                 string            `json:"url"`
+	RequestType         string            `json:"requestType"`
+	Headers             map[string]string `json:"headers"`
+	FormParams          map[string]string `json:"formParams"`
+	UrlParams           map[string]string `json:"urlParams"`
+	ResponseCode        int               `json:"responseCode"`
+	ResponseTime        int64             `json:"responseTime"`
+	CheckEvery          string            `json:"checkEvery"`
+	_checkEvery         time.Duration     `json:"-"`
+	Timeout             string            `json:"timeout"`
+	_timeout            time.Duration     `json:"-"`
+	MedianResponseCount int               `json:"medianResponseCount"`
 }
 
 // Set Id for request
@@ -120,37 +121,35 @@ func RequestsInit(data []RequestConfig, concurrency int) {
 	requestChannel = make(chan RequestConfig, len(data))
 
 	if len(data) == 0 {
-		println("\nNo requests to monitor. Please add requests to you config file")
+		fmt.Println("\nNo requests to monitor. Please add requests to you config file!")
 		os.Exit(3)
 	}
 	// send requests to make sure every every request is valid
-	println("\nSending requests to apis.....making sure everything is right before we start monitoring")
-	println("Api Count: ", len(data))
+	fmt.Println("\nSending requests to apis.....making sure everything is right before we start monitoring")
+	fmt.Println("Api Count: ", len(data))
 
 	for i, requestConfig := range data {
-		println("Request #", i, " : ", requestConfig.RequestType, " ", requestConfig.Url)
+		fmt.Printf("Request #%d:%s %s\n", i, requestConfig.RequestType, requestConfig.Url)
 
 		// Perform request
 		reqErr := PerformRequest(requestConfig, nil)
 
 		if reqErr != nil {
 			// Request Failed
-			println("\nFailed !!!! Not able to perfome below request")
-			println("\n----Request Deatails---")
-			println("Url :", requestConfig.Url)
-			println("Type :", requestConfig.RequestType)
-			println("Error Reason :", reqErr.Error())
-			println("\nPlease check the config file and try again")
+			fmt.Println("Request Failed !!!! Not able to perfome below request:")
+			fmt.Println("----Request Deatails---")
+			fmt.Printf("Url: %s\nType: %s\nError: %s\n", requestConfig.Url, requestConfig.RequestType, reqErr)
+			fmt.Println("Please check the config file and try again!")
 			os.Exit(3)
 		}
 	}
 
-	println("All requests Successfull")
+	fmt.Println("All requests Successfull")
 }
 
 // Start monitoring by calling createTicker method for each request
 func StartMonitoring() {
-	fmt.Println("\nStarted Monitoring all ", len(RequestsList), " apis .....")
+	fmt.Printf("Started Monitoring %d apis .....\n", len(RequestsList))
 
 	go listenToRequestChannel()
 
@@ -180,16 +179,16 @@ func listenToRequestChannel() {
 	// throttle is used to limit number of requests executed at a time
 	for {
 		select {
-		case requect := <-requestChannel:
+		case request := <-requestChannel:
 			throttle <- 1
-			go PerformRequest(requect, throttle)
+			go PerformRequest(request, throttle)
 		}
 	}
 }
 
 // takes the date from requestConfig and creates http request and executes it
 func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
-	// Remove value from throttel channel when request is completed
+	// Remove value from throttle channel when request is completed
 	defer func() {
 		if throttle != nil {
 			<-throttle
@@ -313,21 +312,21 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 			RequestType:  requestConfig.RequestType,
 			ResponseCode: getResponse.StatusCode,
 			ResponseBody: convertResponseToString(getResponse),
-			Reason:       errResposeCode(getResponse.StatusCode, requestConfig.ResponseCode),
+			Reason:       errResponseCode(getResponse.StatusCode, requestConfig.ResponseCode),
 			OtherInfo:    "",
 		})
-		return errResposeCode(getResponse.StatusCode, requestConfig.ResponseCode)
+		return errResponseCode(getResponse.StatusCode, requestConfig.ResponseCode)
 	}
 
 	elapsed := time.Since(start)
 
-	// Request succesfull . Add infomartion to Database
+	// Request succesfull. Add entry to Database
 	go database.AddRequestInfo(database.RequestInfo{
 		Id:                   requestConfig.Id,
 		Url:                  requestConfig.Url,
 		RequestType:          requestConfig.RequestType,
 		ResponseCode:         getResponse.StatusCode,
-		ResponseTime:         elapsed.Nanoseconds() / 1000000,
+		ResponseTimeMs:       elapsed.Milliseconds(),
 		ExpectedResponseTime: requestConfig.ResponseTime,
 	})
 
@@ -386,6 +385,6 @@ func GetJsonParamsBody(params map[string]string) (io.Reader, error) {
 }
 
 // creates an error when response code from server is not equal to response code mentioned in config file
-func errResposeCode(status int, expectedStatus int) error {
-	return errors.New(fmt.Sprintf("Got Response code %v. Expected Response Code %v ", status, expectedStatus))
+func errResponseCode(status int, expectedStatus int) error {
+	return fmt.Errorf("Got Response code %v. Expected Response Code %v ", status, expectedStatus)
 }

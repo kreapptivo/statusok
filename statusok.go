@@ -10,13 +10,16 @@ import (
 	"statusok/database"
 	"statusok/notify"
 	"statusok/requests"
-	"strconv"
 	"time"
 
 	"github.com/urfave/cli"
 )
 
-type configParser struct {
+const (
+	DefaultPort = 7321
+)
+
+type configuration struct {
 	NotifyWhen    NotifyWhen               `json:"notifyWhen"`
 	Requests      []requests.RequestConfig `json:"requests"`
 	Notifications notify.NotificationTypes `json:"notifications"`
@@ -26,8 +29,8 @@ type configParser struct {
 }
 
 type NotifyWhen struct {
-	MeanResponseCount int `json:"meanResponseCount"`
-	ErrorCount        int `json:"errorCount"`
+	MinResponseCount int `json:"minResponseCount"`
+	ErrorCount       int `json:"errorCount"`
 }
 
 func main() {
@@ -50,43 +53,54 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) {
-		if fileExists(c.String("config")) {
-
-			if len(c.String("log")) != 0 {
-				// log parameter given.Check if file can be created at given path
-
-				if !logFilePathValid(c.String("log")) {
-					println("Invalid File Path given for parameter --log")
-					os.Exit(3)
-				}
-			}
-
-			println("Reading File :", c.String("config"))
-
-			// Start monitoring when a valid file path is given
-			startMonitoring(c.String("config"), c.String("log"))
-		} else {
+		if len(c.String("config")) == 0 || !fileExists(c.String("config")) {
 			fmt.Printf("Config file not present at the given location: %s\n. Please use correct file location with --config parameter", c.String("config"))
+			return
 		}
+
+		if len(c.String("log")) != 0 && !logFilePathValid(c.String("log")) {
+			// log parameter given.Check if file can be created at given path
+
+			fmt.Printf("Invalid File Path given for parameter --log: %s", c.String("log"))
+			os.Exit(3)
+		}
+
+		// parse config file
+		fmt.Printf("Using config file : %s", c.String("config"))
+		config, err := readConfig(c.String("config"))
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(3)
+		}
+		// Start monitoring when a valid file path is given
+		startMonitoring(config, c.String("log"))
 	}
 
 	// Run as cli app
-	app.Run(os.Args)
+	err := app.Run(os.Args)
+	if err != nil {
+		fmt.Printf("Error starting Application: %s\n", err.Error())
+	}
 }
 
-func startMonitoring(configFileName string, logFileName string) {
-	configFile, err := os.Open(configFileName)
+func readConfig(configFilename string) (configuration, error) {
+	var config configuration
+
+	configFile, err := os.Open(configFilename)
 	if err != nil {
-		fmt.Printf("Error opening config file: %s\n", err.Error())
+		return config, fmt.Errorf("Error opening config file: %s\n", err.Error())
 	}
 
 	// parse the config file data to configParser struct
 	jsonParser := json.NewDecoder(configFile)
-	var config configParser
 	if err = jsonParser.Decode(&config); err != nil {
-		fmt.Println("Error parsing config file .Please check format of the file \nParse Error:", err.Error())
-		os.Exit(3)
+		return config, fmt.Errorf("Error parsing config file. Please check format of the file!\nParse Error: %s\n", err.Error())
 	}
+	return config, nil
+}
+
+func startMonitoring(config configuration, logFileName string) {
+	var err error
 
 	// setup different notification clients
 	notify.AddNew(config.Notifications)
@@ -97,8 +111,13 @@ func startMonitoring(configFileName string, logFileName string) {
 	reqs, ids := validateAndCreateIdsForRequests(config.Requests)
 
 	// Set up and initialize databases
-	database.AddNew(config.Database)
-	database.Initialize(ids, config.NotifyWhen.MeanResponseCount, config.NotifyWhen.ErrorCount)
+
+	err = database.ParseDBConfig(config.Database)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(3)
+	}
+	database.Initialize(ids, config.NotifyWhen.MinResponseCount, config.NotifyWhen.ErrorCount)
 
 	// Initialize and start monitoring all the apis
 	requests.RequestsInit(reqs, config.Concurrency)
@@ -109,12 +128,15 @@ func startMonitoring(configFileName string, logFileName string) {
 	// Just to check StatusOk is running or not
 	http.HandleFunc("/", statusHandler)
 
-	if config.Port == 0 {
-		// Default port
-		http.ListenAndServe(":7321", nil)
-	} else {
-		// if port is mentioned in config file
-		http.ListenAndServe(":"+strconv.Itoa(config.Port), nil)
+	usedPort := config.Port
+	if usedPort == 0 {
+		usedPort = DefaultPort
+	}
+
+	localAddress := fmt.Sprintf(":%d", usedPort)
+	err = http.ListenAndServe(localAddress, nil)
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -136,10 +158,10 @@ func fileExists(name string) bool {
 
 func logFilePathValid(name string) bool {
 	f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	defer f.Close()
 	if err != nil {
 		return false
 	}
+	defer f.Close()
 
 	return true
 }
@@ -151,7 +173,7 @@ func validateAndCreateIdsForRequests(reqs []requests.RequestConfig) ([]requests.
 	random := rand.New(source)
 
 	// an array of ids used by database pacakge to calculate mean response time and send notifications
-	ids := make(map[int]int64, 0)
+	ids := make(map[int]int64)
 
 	// an array of new requests data after updating the ids
 	newreqs := make([]requests.RequestConfig, 0)
@@ -159,8 +181,8 @@ func validateAndCreateIdsForRequests(reqs []requests.RequestConfig) ([]requests.
 	for i, requestConfig := range reqs {
 		validateErr := requestConfig.Validate()
 		if validateErr != nil {
-			println("\nInvalid Request data in config file for Request #", i, " ", requestConfig.Url)
-			println("Error:", validateErr.Error())
+			fmt.Printf("Invalid Request data in config file for Request #%d: %s\n", i, requestConfig.Url)
+			fmt.Printf("Error: %s\n", validateErr.Error())
 			os.Exit(3)
 		}
 

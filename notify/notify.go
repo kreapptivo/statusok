@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-//Diffrent types of clients to deliver notifications
+// Diffrent types of clients to deliver notifications
 type NotificationTypes struct {
 	MailNotify MailNotify      `json:"mail"`
 	Mailgun    MailgunNotify   `json:"mailGun"`
@@ -19,10 +19,10 @@ type NotificationTypes struct {
 }
 
 type ResponseTimeNotification struct {
-	Url                  string
-	RequestType          string
-	ExpectedResponsetime int64
-	MeanResponseTime     int64
+	Url                    string
+	RequestType            string
+	ExpectedResponsetimeMs int64
+	MeanResponseTimeMs     int64
 }
 
 type ErrorNotification struct {
@@ -45,14 +45,13 @@ type Notify interface {
 	SendErrorNotification(notification ErrorNotification) error
 }
 
-//Add notification clients given by user in config file to notificationsList
+// Add notification clients given by user in config file to notificationsList
 func AddNew(notificationTypes NotificationTypes) {
-
 	v := reflect.ValueOf(notificationTypes)
 
 	for i := 0; i < v.NumField(); i++ {
 		notifyString := fmt.Sprint(v.Field(i).Interface().(Notify))
-		//Check whether notify object is empty . if its not empty add to the list
+		// Check whether notify object is empty . if its not empty add to the list
 		if !isEmptyObject(notifyString) {
 			notificationsList = append(notificationsList, v.Field(i).Interface().(Notify))
 		}
@@ -77,35 +76,28 @@ func AddNew(notificationTypes NotificationTypes) {
 	}
 }
 
-//Send response time notification to all clients registered
+// Send response time notification to all clients registered
 func SendResponseTimeNotification(responseTimeNotification ResponseTimeNotification) {
-
 	for _, value := range notificationsList {
 		err := value.SendResponseTimeNotification(responseTimeNotification)
-
-		//TODO: exponential retry if fails ? what to do when error occurs ?
+		// TODO: exponential retry if fails ? what to do when error occurs ?
 		if err != nil {
-
 		}
 	}
 }
 
-//Send Error notification to all clients registered
+// Send Error notification to all clients registered
 func SendErrorNotification(errorNotification ErrorNotification) {
-
 	for _, value := range notificationsList {
 		err := value.SendErrorNotification(errorNotification)
-
-		//TODO: exponential retry if fails ? what to do when error occurs ?
+		// TODO: exponential retry if fails ? what to do when error occurs ?
 		if err != nil {
-
 		}
 	}
 }
 
-//Send Test notification to all registered clients .To make sure everything is working
+// Send Test notification to all registered clients .To make sure everything is working
 func SendTestNotification() {
-
 	println("Sending Test notifications to the registered clients")
 
 	for _, value := range notificationsList {
@@ -151,20 +143,18 @@ func isEmptyObject(objectString string) bool {
 	}
 }
 
-//A readable message string from responseTimeNotification
+// A readable message string from responseTimeNotification
 func getMessageFromResponseTimeNotification(responseTimeNotification ResponseTimeNotification) string {
-
 	message := fmt.Sprintf("Notification From StatusOk\n\nOne of your apis response time is below than expected."+
 		"\n\nPlease find the Details below"+
 		"\n\nUrl: %v \nRequestType: %v \nCurrent Average Response Time: %v ms\nExpected Response Time: %v ms\n"+
-		"\n\nThanks", responseTimeNotification.Url, responseTimeNotification.RequestType, responseTimeNotification.MeanResponseTime, responseTimeNotification.ExpectedResponsetime)
+		"\n\nThanks", responseTimeNotification.Url, responseTimeNotification.RequestType, responseTimeNotification.MeanResponseTimeMs, responseTimeNotification.ExpectedResponsetimeMs)
 
 	return message
 }
 
-//A readable message string from errorNotification
+// A readable message string from errorNotification
 func getMessageFromErrorNotification(errorNotification ErrorNotification) string {
-
 	message := fmt.Sprintf("Notification From StatusOk\n\nWe are getting error when we try to send request to one of your apis"+
 		"\n\nPlease find the Details below"+
 		"\n\nUrl: %v \nRequestType: %v \nError Message: %v \nResponse Body: %v\nOther Info:%v\n"+

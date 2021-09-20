@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"statusok/notify"
 	"strings"
 
@@ -12,15 +13,15 @@ import (
 )
 
 var (
-	MeanResponseCount = 5 // Default number of response times to calcuate mean response time
-	ErrorCount        = 1 // Default number of errors should occur to send notification
+	MinResponseCount = 3 // Default number of response times to calcuate median response time
+	ErrorCount       = 1 // Default number of errors should occur to send notification
 
-	dbList       []Database      // list of databases registered
-	responseMean map[int][]int64 // A map of queues to calculate mean response time
+	dbList        []Database      // list of databases registered
+	responseQueue map[int][]int64 // A map of queues to calculate mean response time
 
-	ErrResposeCode   = errors.New("Response code do not Match")
+	ErrResponseCode  = errors.New("Response code do not Match")
 	ErrTimeout       = errors.New("Request Time out Error")
-	ErrCreateRequest = errors.New("Invalid Request Config.Not able to create request")
+	ErrCreateRequest = errors.New("Invalid Request Config. Not able to create request")
 	ErrDoRequest     = errors.New("Request failed")
 
 	isLoggingEnabled = false // default
@@ -31,7 +32,7 @@ type RequestInfo struct {
 	Url                  string
 	RequestType          string
 	ResponseCode         int
-	ResponseTime         int64
+	ResponseTimeMs       int64
 	ExpectedResponseTime int64
 }
 
@@ -57,81 +58,82 @@ type DatabaseTypes struct {
 }
 
 // Intialize responseMean app and counts
-func Initialize(ids map[int]int64, mMeanResponseCount int, mErrorCount int) {
-	if mMeanResponseCount != 0 {
-		MeanResponseCount = mMeanResponseCount
+func Initialize(ids map[int]int64, mMinResponseCount int, mErrorCount int) {
+	if mMinResponseCount != 0 {
+		MinResponseCount = mMinResponseCount
 	}
 
 	if mErrorCount != 0 {
 		ErrorCount = mErrorCount
 	}
-	// TODO: try to make all slices as pointers
-	responseMean = make(map[int][]int64)
+	// TODO: try to make all slices as pointers or adapt Storage
+	initResponseQueue()
 
 	for id := range ids {
 		queue := make([]int64, 0)
-		responseMean[id] = queue
+		UpdateResponseQueue(id, queue)
 	}
 }
 
-// Add database to the database List
-func AddNew(databaseTypes DatabaseTypes) {
-	v := reflect.ValueOf(databaseTypes)
+func ConfiguredDatabases() int {
+	return len(dbList)
+}
 
+func ParseDBConfig(databases DatabaseTypes) error {
+	v := reflect.ValueOf(databases)
+	var errors []error
 	for i := 0; i < v.NumField(); i++ {
 		dbString := fmt.Sprint(v.Field(i).Interface().(Database))
 
-		// Check whether notify object is empty . if its not empty add to the list
+		// Check whether notify object is empty. if its not empty add to the list
 		if !isEmptyObject(dbString) {
-			dbList = append(dbList, v.Field(i).Interface().(Database))
+			// dbList = append(dbList, v.Field(i).Interface().(Database))
+			if err := AddNew(v.Field(i).Interface().(Database)); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 
-	if len(dbList) > 0 {
-		fmt.Printf("Intializing Databases....")
+	if len(errors) > 0 {
+		return fmt.Errorf("Got %d errors during database init. Errors: %v", len(errors), errors)
 	}
-
-	// Intialize all databases given by user by calling the initialize method
-	for _, value := range dbList {
-
-		initErr := value.Initialize()
-
-		if initErr != nil {
-			fmt.Printf("Failed to Intialize Database %s, err: %s\n", value.GetDatabaseName(), initErr)
-			os.Exit(3)
-		}
-
-	}
-
-	// Set first database as primary database
-	if len(dbList) > 0 {
-		addTestErrorAndRequestInfo()
-	} else {
+	if len(dbList) < 1 {
 		fmt.Println("No Database selected.")
 	}
+	return nil
+}
+
+// Add database to the database List
+func AddNew(database Database) error {
+	// Intialize and database given by user by calling the initialize method
+	if initErr := database.Initialize(); initErr != nil {
+		return fmt.Errorf("Failed to Intialize Database %s, err: %s\n", database.GetDatabaseName(), initErr)
+	}
+
+	if writeErr := addTestErrorAndRequestInfo(database); writeErr != nil {
+		return fmt.Errorf("Failed to access Database %s, err: %s\n", database.GetDatabaseName(), writeErr)
+	}
+
+	dbList = append(dbList, database)
+	return nil
 }
 
 // Insert test data to database
-func addTestErrorAndRequestInfo() {
-	fmt.Println("Adding Test data to your database ....")
+func addTestErrorAndRequestInfo(db Database) error {
+	fmt.Printf("Adding Test data to your database %s...\n", db.GetDatabaseName())
 
 	requestInfo := RequestInfo{0, "http://test.com", "GET", 0, 0, 0}
 
+	if reqErr := db.AddRequestInfo(requestInfo); reqErr != nil {
+		return fmt.Errorf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), reqErr)
+	}
+
 	errorInfo := ErrorInfo{0, "http://test.com", "GET", 0, "test response", errors.New("test error"), "test other info"}
 
-	for _, db := range dbList {
-		reqErr := db.AddRequestInfo(requestInfo)
-		if reqErr != nil {
-			fmt.Printf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), reqErr)
-		}
-
-		errErr := db.AddErrorInfo(errorInfo)
-
-		if errErr != nil {
-			fmt.Printf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), errErr)
-		}
-
+	if errErr := db.AddErrorInfo(errorInfo); errErr != nil {
+		return fmt.Errorf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), errErr)
 	}
+	return nil
 }
 
 // This function is called by requests package when request has been successfully performed
@@ -139,26 +141,31 @@ func addTestErrorAndRequestInfo() {
 func AddRequestInfo(requestInfo RequestInfo) {
 	logRequestInfo(requestInfo)
 
-	// Insert to all databses
+	// Response time to queue
+	AddResponseTimeToRequest(requestInfo.Id, requestInfo.ResponseTimeMs)
+
+	// Insert to all configured db's
 	for _, db := range dbList {
 		go db.AddRequestInfo(requestInfo)
 	}
 
-	// Response time to queue
-	addResponseTimeToRequest(requestInfo.Id, requestInfo.ResponseTime)
+	if CountResponsesInQueue(requestInfo.Id) < MinResponseCount {
+		return
+	}
 
 	// calculate current mean response time . if its less than expected send notitifcation
-	mean, meanErr := getMeanResponseTimeOfUrl(requestInfo.Id)
+	// mean, meanErr := GetMeanResponseTimeOfUrl(requestInfo.Id)
+	mean, meanErr := GetMedianResponseTimeOfUrl(requestInfo.Id)
 
 	if meanErr == nil {
+		ClearQueue(requestInfo.Id)
 		if mean > requestInfo.ExpectedResponseTime {
-			clearQueue(requestInfo.Id)
 			// TODO :error retry  exponential?
 			notify.SendResponseTimeNotification(notify.ResponseTimeNotification{
-				Url:                  requestInfo.Url,
-				RequestType:          requestInfo.RequestType,
-				ExpectedResponsetime: requestInfo.ExpectedResponseTime,
-				MeanResponseTime:     mean,
+				Url:                    requestInfo.Url,
+				RequestType:            requestInfo.RequestType,
+				ExpectedResponsetimeMs: requestInfo.ExpectedResponseTime,
+				MeanResponseTimeMs:     mean,
 			})
 		}
 	}
@@ -185,40 +192,88 @@ func AddErrorInfo(errorInfo ErrorInfo) {
 	}
 }
 
-func addResponseTimeToRequest(id int, responseTime int64) {
-	if responseMean != nil {
-		queue := responseMean[id]
+func initResponseQueue() {
+	responseQueue = make(map[int][]int64)
+}
 
-		if len(queue) == MeanResponseCount {
-			queue = queue[1:]
-			queue = append(queue, responseTime)
-		} else {
-			queue = append(queue, responseTime)
-		}
-
-		responseMean[id] = queue
+func CountResponsesInQueue(id int) int {
+	if len(responseQueue) > 0 {
+		return len(responseQueue[id])
 	}
+	return 0
+}
+
+func GetResponseQueue(id int) []int64 {
+	if responseQueue == nil {
+		initResponseQueue()
+	}
+
+	if len(responseQueue) > 0 {
+		return responseQueue[id]
+	}
+	return []int64{}
+}
+
+func UpdateResponseQueue(id int, queue []int64) {
+	responseQueue[id] = queue
+}
+
+func AddResponseTimeToRequest(id int, responseTime int64) {
+	if responseQueue == nil {
+		return
+	}
+	queue := GetResponseQueue(id)
+
+	if len(queue) == MinResponseCount {
+		queue = queue[1:]
+	}
+	queue = append(queue, responseTime)
+
+	UpdateResponseQueue(id, queue)
 }
 
 // Calculate current  mean response time for the given request id
-func getMeanResponseTimeOfUrl(id int) (int64, error) {
-	queue := responseMean[id]
-
-	if len(queue) < MeanResponseCount {
-		return 0, errors.New("Stil the count has not been reached")
+func GetMeanResponseTimeOfUrl(id int) (int64, error) {
+	if CountResponsesInQueue(id) < MinResponseCount {
+		return 0, fmt.Errorf("The number of requests %d has not been reached the minResponseCount %d yet.", CountResponsesInQueue(id), MinResponseCount)
 	}
 
+	queue := GetResponseQueue(id)
 	var sum int64
 
 	for _, val := range queue {
 		sum = sum + val
 	}
 
-	return sum / int64(MeanResponseCount), nil
+	return sum / int64(len(queue)), nil
 }
 
-func clearQueue(id int) {
-	responseMean[id] = make([]int64, 0)
+// Calculate current median response time for the given request id
+func GetMedianResponseTimeOfUrl(id int) (int64, error) {
+	if CountResponsesInQueue(id) < MinResponseCount {
+		return 0, fmt.Errorf("The number of requests %d has not been reached the minResponseCount %d yet.", CountResponsesInQueue(id), MinResponseCount)
+	}
+
+	queue := GetResponseQueue(id)
+
+	if len(queue) == 1 {
+		return queue[0], nil
+	}
+
+	// sort the numbers
+	sort.Slice(queue, func(i, j int) bool { return queue[i] < queue[j] })
+
+	mNumber := len(queue) / 2
+
+	if len(queue)%2 != 0 {
+		return queue[mNumber], nil
+	}
+
+	return (queue[mNumber-1] + queue[mNumber]) / 2, nil
+}
+
+func ClearQueue(id int) {
+	UpdateResponseQueue(id, make([]int64, 0))
 }
 
 func isEmptyObject(objectString string) bool {
@@ -275,7 +330,7 @@ func logRequestInfo(requestInfo RequestInfo) {
 			"url":                  requestInfo.Url,
 			"requestType":          requestInfo.RequestType,
 			"responseCode":         requestInfo.ResponseCode,
-			"responseTime":         requestInfo.ResponseTime,
+			"responseTimeMs":       requestInfo.ResponseTimeMs,
 			"expectedResponseTime": requestInfo.ExpectedResponseTime,
 		}).Info("")
 	}
