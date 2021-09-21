@@ -1,4 +1,4 @@
-[![CodeQL](https://github.com/kreapptivo/statusok/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/kreapptivo/statusok/actions/workflows/codeql-analysis.yml)
+[![CodeQL](https://github.com/kreapptivo/statusok/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/kreapptivo/statusok/actions/workflows/codeql-analysis.yml) [![Go](https://github.com/kreapptivo/statusok/actions/workflows/go.yml/badge.svg?event=push)](https://github.com/kreapptivo/statusok/actions/workflows/go.yml)
 
 # StatusOK
 
