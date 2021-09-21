@@ -3,13 +3,12 @@ package database
 import (
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"sort"
+	"statusok/logger"
+	"statusok/model"
 	"statusok/notify"
 	"strings"
-
-	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -23,38 +22,22 @@ var (
 	ErrTimeout       = errors.New("Request Time out Error")
 	ErrCreateRequest = errors.New("Invalid Request Config. Not able to create request")
 	ErrDoRequest     = errors.New("Request failed")
-
-	isLoggingEnabled = false // default
 )
-
-type RequestInfo struct {
-	Id                   int
-	Url                  string
-	RequestType          string
-	ResponseCode         int
-	ResponseTimeMs       int64
-	ExpectedResponseTime int64
-}
-
-type ErrorInfo struct {
-	Id           int
-	Url          string
-	RequestType  string
-	ResponseCode int
-	ResponseBody string
-	Reason       error
-	OtherInfo    string
-}
 
 type Database interface {
 	Initialize() error
 	GetDatabaseName() string
-	AddRequestInfo(requestInfo RequestInfo) error
-	AddErrorInfo(errorInfo ErrorInfo) error
+	AddRequestInfo(requestInfo model.RequestInfo) error
+	AddErrorInfo(errorInfo model.ErrorInfo) error
+	IsEmpty() bool
 }
 
 type DatabaseTypes struct {
 	InfluxDb InfluxDb `json:"influxDb"`
+}
+
+func ResetDatabases() {
+	dbList = []Database{}
 }
 
 // Intialize responseMean app and counts
@@ -79,16 +62,19 @@ func ConfiguredDatabases() int {
 	return len(dbList)
 }
 
-func ParseDBConfig(databases DatabaseTypes) error {
+func ParseDBConfig(databases DatabaseTypes) (err error) {
+	if (databases == DatabaseTypes{} || databases.InfluxDb == InfluxDb{}) {
+		return nil
+	}
+
 	v := reflect.ValueOf(databases)
 	var errors []error
 	for i := 0; i < v.NumField(); i++ {
 		dbString := fmt.Sprint(v.Field(i).Interface().(Database))
 
-		// Check whether notify object is empty. if its not empty add to the list
 		if !isEmptyObject(dbString) {
-			// dbList = append(dbList, v.Field(i).Interface().(Database))
-			if err := AddNew(v.Field(i).Interface().(Database)); err != nil {
+			newDb := v.Field(i).Interface().(Database)
+			if err := AddNew(newDb); err != nil {
 				errors = append(errors, err)
 			}
 		}
@@ -98,20 +84,24 @@ func ParseDBConfig(databases DatabaseTypes) error {
 		return fmt.Errorf("Got %d errors during database init. Errors: %v", len(errors), errors)
 	}
 	if len(dbList) < 1 {
-		fmt.Println("No Database selected.")
+		fmt.Println("No valid database found.")
 	}
 	return nil
 }
 
 // Add database to the database List
 func AddNew(database Database) error {
+	if database.IsEmpty() {
+		return nil
+	}
+
 	// Intialize and database given by user by calling the initialize method
 	if initErr := database.Initialize(); initErr != nil {
-		return fmt.Errorf("Failed to Intialize Database %s, err: %s\n", database.GetDatabaseName(), initErr)
+		return fmt.Errorf("Failed to Intialize Database %s, err: %s", database.GetDatabaseName(), initErr)
 	}
 
 	if writeErr := addTestErrorAndRequestInfo(database); writeErr != nil {
-		return fmt.Errorf("Failed to access Database %s, err: %s\n", database.GetDatabaseName(), writeErr)
+		return fmt.Errorf("Failed to access Database %s, err: %s", database.GetDatabaseName(), writeErr)
 	}
 
 	dbList = append(dbList, database)
@@ -122,24 +112,24 @@ func AddNew(database Database) error {
 func addTestErrorAndRequestInfo(db Database) error {
 	fmt.Printf("Adding Test data to your database %s...\n", db.GetDatabaseName())
 
-	requestInfo := RequestInfo{0, "http://test.com", "GET", 0, 0, 0}
+	requestInfo := model.RequestInfo{Id: 0, Url: "http://test.com", RequestType: "GET", ResponseCode: 0, ResponseTimeMs: 0, ExpectedResponseTime: 0}
 
 	if reqErr := db.AddRequestInfo(requestInfo); reqErr != nil {
-		return fmt.Errorf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), reqErr)
+		return fmt.Errorf("InfluxDB: Failed to insert Request data to database %s, error: %s. Please check whether database is installed properly!", db.GetDatabaseName(), reqErr)
 	}
 
-	errorInfo := ErrorInfo{0, "http://test.com", "GET", 0, "test response", errors.New("test error"), "test other info"}
+	errorInfo := model.ErrorInfo{Id: 0, Url: "http://test.com", RequestType: "GET", ResponseCode: 0, ResponseBody: "test response", Reason: errors.New("test error"), OtherInfo: "test other info"}
 
 	if errErr := db.AddErrorInfo(errorInfo); errErr != nil {
-		return fmt.Errorf("InfluxDB: Failed to insert Error Info to database %s, error: %s. Please check whether database is installed properly!\n", db.GetDatabaseName(), errErr)
+		return fmt.Errorf("InfluxDB: Failed to insert Error data to database %s, error: %s. Please check whether database is installed properly!", db.GetDatabaseName(), errErr)
 	}
 	return nil
 }
 
 // This function is called by requests package when request has been successfully performed
 // Request data is inserted to all the registered databases
-func AddRequestInfo(requestInfo RequestInfo) {
-	logRequestInfo(requestInfo)
+func AddRequestInfo(requestInfo model.RequestInfo) {
+	logger.LogRequestInfo(requestInfo)
 
 	// Response time to queue
 	AddResponseTimeToRequest(requestInfo.Id, requestInfo.ResponseTimeMs)
@@ -158,26 +148,24 @@ func AddRequestInfo(requestInfo RequestInfo) {
 	mean, meanErr := GetMedianResponseTimeOfUrl(requestInfo.Id)
 
 	if meanErr == nil {
-		ClearQueue(requestInfo.Id)
 		if mean > requestInfo.ExpectedResponseTime {
-			// TODO :error retry  exponential?
 			notify.SendResponseTimeNotification(notify.ResponseTimeNotification{
 				Url:                    requestInfo.Url,
 				RequestType:            requestInfo.RequestType,
 				ExpectedResponsetimeMs: requestInfo.ExpectedResponseTime,
 				MeanResponseTimeMs:     mean,
 			})
+			ClearQueue(requestInfo.Id)
 		}
 	}
 }
 
 // This function is called by requests package when a reuquest fails
 // Error Information is inserted to all the registered databases
-func AddErrorInfo(errorInfo ErrorInfo) {
-	logErrorInfo(errorInfo)
+func AddErrorInfo(errorInfo model.ErrorInfo) {
+	logger.LogErrorInfo(errorInfo)
 
 	// Request failed send notification
-	// TODO :error retry  exponential?
 	notify.SendErrorNotification(notify.ErrorNotification{
 		Url:          errorInfo.Url,
 		RequestType:  errorInfo.RequestType,
@@ -286,52 +274,5 @@ func isEmptyObject(objectString string) bool {
 		return false
 	} else {
 		return true
-	}
-}
-
-func EnableLogging(fileName string) {
-	isLoggingEnabled = true
-
-	// Log as JSON instead of the default ASCII formatter.
-	logrus.SetFormatter(&logrus.JSONFormatter{})
-
-	if len(fileName) == 0 {
-		// Output to stderr instead of stdout, could also be a file.
-		logrus.SetOutput(os.Stderr)
-	} else {
-		f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			println("Invalid File Path given for parameter --log")
-			os.Exit(3)
-		}
-
-		logrus.SetOutput(f)
-	}
-}
-
-func logErrorInfo(errorInfo ErrorInfo) {
-	if isLoggingEnabled {
-		logrus.WithFields(logrus.Fields{
-			"id":           errorInfo.Id,
-			"url":          errorInfo.Url,
-			"requestType":  errorInfo.RequestType,
-			"responseCode": errorInfo.ResponseCode,
-			"responseBody": errorInfo.ResponseBody,
-			"reason":       errorInfo.Reason.Error(),
-			"otherInfo":    errorInfo.Reason,
-		}).Error("Status Ok Error occurred for url " + errorInfo.Url)
-	}
-}
-
-func logRequestInfo(requestInfo RequestInfo) {
-	if isLoggingEnabled {
-		logrus.WithFields(logrus.Fields{
-			"id":                   requestInfo.Id,
-			"url":                  requestInfo.Url,
-			"requestType":          requestInfo.RequestType,
-			"responseCode":         requestInfo.ResponseCode,
-			"responseTimeMs":       requestInfo.ResponseTimeMs,
-			"expectedResponseTime": requestInfo.ExpectedResponseTime,
-		}).Info("")
 	}
 }

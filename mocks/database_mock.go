@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"statusok/database"
+	"statusok/model"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -17,6 +17,15 @@ type Database interface {
 
 type MockedDatabase struct {
 	mock.Mock
+}
+
+func (m *MockedDatabase) IsEmpty() bool {
+	args := m.Called()
+	// return nil
+	if len(args) > 0 {
+		return args.Get(0).(bool)
+	}
+	return false
 }
 
 func (m *MockedDatabase) Initialize() error {
@@ -37,7 +46,7 @@ func (m *MockedDatabase) GetDatabaseName() string {
 	return "Mocked Database"
 }
 
-func (m *MockedDatabase) AddRequestInfo(requestInfo database.RequestInfo) error {
+func (m *MockedDatabase) AddRequestInfo(requestInfo model.RequestInfo) error {
 	args := m.Called()
 
 	if len(args) > 0 {
@@ -46,7 +55,7 @@ func (m *MockedDatabase) AddRequestInfo(requestInfo database.RequestInfo) error 
 	return nil
 }
 
-func (m *MockedDatabase) AddErrorInfo(errorInfo database.ErrorInfo) error {
+func (m *MockedDatabase) AddErrorInfo(errorInfo model.ErrorInfo) error {
 	args := m.Called()
 
 	if len(args) > 0 {

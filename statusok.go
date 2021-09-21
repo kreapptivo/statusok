@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"statusok/database"
+	"statusok/logger"
 	"statusok/notify"
 	"statusok/requests"
 	"time"
@@ -123,7 +124,7 @@ func startMonitoring(config configuration, logFileName string) {
 	requests.RequestsInit(reqs, config.Concurrency)
 	requests.StartMonitoring()
 
-	database.EnableLogging(logFileName)
+	logger.EnableLogging(logFileName)
 
 	// Just to check StatusOk is running or not
 	http.HandleFunc("/", statusHandler)

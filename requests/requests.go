@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"statusok/database"
+	"statusok/model"
 	"strconv"
 	"time"
 )
@@ -210,7 +211,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 			jsonBody, jsonErr := GetJsonParamsBody(requestConfig.FormParams)
 			if jsonErr != nil {
 				// Not able to create Request object.Add Error to Database
-				go database.AddErrorInfo(database.ErrorInfo{
+				go database.AddErrorInfo(model.ErrorInfo{
 					Id:           requestConfig.Id,
 					Url:          requestConfig.Url,
 					RequestType:  requestConfig.RequestType,
@@ -253,7 +254,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 
 	if reqErr != nil {
 		// Not able to create Request object.Add Error to Database
-		go database.AddErrorInfo(database.ErrorInfo{
+		go database.AddErrorInfo(model.ErrorInfo{
 			Id:           requestConfig.Id,
 			Url:          requestConfig.Url,
 			RequestType:  requestConfig.RequestType,
@@ -290,7 +291,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 		} else {
 			statusCode = getResponse.StatusCode
 		}
-		go database.AddErrorInfo(database.ErrorInfo{
+		go database.AddErrorInfo(model.ErrorInfo{
 			Id:           requestConfig.Id,
 			Url:          requestConfig.Url,
 			RequestType:  requestConfig.RequestType,
@@ -306,7 +307,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 
 	if getResponse.StatusCode != requestConfig.ResponseCode {
 		// Response code is not the expected one .Add Error to database
-		go database.AddErrorInfo(database.ErrorInfo{
+		go database.AddErrorInfo(model.ErrorInfo{
 			Id:           requestConfig.Id,
 			Url:          requestConfig.Url,
 			RequestType:  requestConfig.RequestType,
@@ -321,7 +322,7 @@ func PerformRequest(requestConfig RequestConfig, throttle chan int) error {
 	elapsed := time.Since(start)
 
 	// Request succesfull. Add entry to Database
-	go database.AddRequestInfo(database.RequestInfo{
+	go database.AddRequestInfo(model.RequestInfo{
 		Id:                   requestConfig.Id,
 		Url:                  requestConfig.Url,
 		RequestType:          requestConfig.RequestType,

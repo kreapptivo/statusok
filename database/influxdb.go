@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"statusok/model"
 	"strconv"
 	"time"
 
@@ -26,13 +27,23 @@ const (
 )
 
 // Return database name
-func (influxDb InfluxDb) GetDatabaseName() string {
+func (influxDb *InfluxDb) GetDatabaseName() string {
 	return DatabaseName
 }
 
+// Check if necessary data is given
+func (influxDb *InfluxDb) IsEmpty() bool {
+	if influxDb.Host == "" ||
+		influxDb.Port == 0 || influxDb.Bucket == "" || influxDb.Org == "" || influxDb.Token == "" {
+		return true
+	}
+	return false
+}
+
 // Intiliaze influx db
-func (influxDb InfluxDb) Initialize() error {
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+func (influxDb *InfluxDb) Initialize() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// TODO: check config variables!
 
@@ -60,8 +71,9 @@ func (influxDb InfluxDb) Initialize() error {
 }
 
 // Add request information to database
-func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+func (influxDb *InfluxDb) AddRequestInfo(requestInfo model.RequestInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	tags := map[string]string{
 		"requestId":   strconv.Itoa(requestInfo.Id),
@@ -88,8 +100,9 @@ func (influxDb InfluxDb) AddRequestInfo(requestInfo RequestInfo) error {
 }
 
 // Add Error information to database
-func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+func (influxDb *InfluxDb) AddErrorInfo(errorInfo model.ErrorInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	tags := map[string]string{
 		"requestId":   strconv.Itoa(errorInfo.Id),
@@ -121,8 +134,9 @@ func (influxDb InfluxDb) AddErrorInfo(errorInfo ErrorInfo) error {
 }
 
 // Returns mean response time of url in given time .Currentlt not used
-func (influxDb InfluxDb) GetMeanResponseTime(Url string, span int) (float64, error) {
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+func (influxDb *InfluxDb) GetMeanResponseTime(Url string, span int) (float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	q := fmt.Sprintf(`select mean(responseTime) from "%s" WHERE time > now() - %dm GROUP BY time(%dm)`, Url, span, span)
 
