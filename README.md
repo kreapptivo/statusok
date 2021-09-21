@@ -1,3 +1,5 @@
+[![CodeQL](https://github.com/kreapptivo/statusok/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/kreapptivo/statusok/actions/workflows/codeql-analysis.yml)
+
 # StatusOK
 
 Monitor your Website and APIs from your computer.Get notified through Slack or E-mail when your server is down or response time is more than expected.
